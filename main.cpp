@@ -3,6 +3,7 @@
 #include <SKSE/GameReferences.h>
 #include <SKSE/SafeWrite.h>
 #include <SKSE/GameData.h>
+#include <SKSE/GameMenus.h>
 
 class BarterManager
 {
@@ -22,33 +23,46 @@ struct BaseExtraListEx
 {
 	UInt32	GetGoldCount()
 	{
-#ifdef _DEBUG
+		UInt32	result = 0;
 		BaseExtraList* pExtraList = reinterpret_cast<BaseExtraList*>(this);
-		_MESSAGE("[BARTER] COINS: %d", pExtraList->GetItemCount()); //Signed 16 bits, so when above 2 << 15,it will be negative.we use 32 bits to store this value instead.
-#endif
-		TESObjectREFR* ref = nullptr;
-		void(__cdecl* LookUpRefByHandle)(void*, TESObjectREFR*&) = (void(__cdecl*)(void*, TESObjectREFR*&))0x004A9180;//LookUpRefByHandle
-		LookUpRefByHandle((void*)0x01B3E518, ref); // 1B3E764 container, 1B3E518 Barter
-		if (ref != nullptr)
+
+		MenuManager* mm = MenuManager::GetSingleton();
+		UIStringHolder* pHolder = UIStringHolder::GetSingleton();
+		GFxMovieView* view = nullptr;
+		if (mm->IsMenuOpen(pHolder->barterMenu))
 		{
-			InventoryChanges*(__cdecl* GetInventoryChanges)(TESObjectREFR* ref) = (InventoryChanges*(__cdecl*)(TESObjectREFR* actor))0x00476800;
-			auto pChanges = GetInventoryChanges(ref);
-			if (pChanges != nullptr)
+			view = mm->GetMovieView(pHolder->barterMenu);
+		}
+		if (view != nullptr)
+		{
+			GFxValue result(true);
+			view->Invoke("_root.Menu_mc.isViewingVendorItems", &result, nullptr, 0);
+			//_MESSAGE("[BARTER] isViewingVendorItems: %d", result.GetBool());
+			if (!result.GetBool())
 			{
-				TESForm* pGold = LookupFormByID(0xF);// No need to use DefaultObjectManager.
-				if (pGold != nullptr)
+				RefHandle refHandle = *(RefHandle*)0x01310630;
+				pExtraList->GetOriginalReferenceHandle(refHandle);
+
+				TESObjectREFR*	ref = nullptr;
+				LookupREFRByHandle(refHandle, ref);
+
+				if (ref != nullptr)
 				{
-					UInt32 totalGolds = BarterManager::GetSingleton()->GetMerchantGolds(); // Didn't test it too many times,should work as expected.
-					UInt32 merchantGolds = abs(pChanges->GetItemCount(pGold));
-					SInt32 contaienrGolds = static_cast<SInt32>(totalGolds - merchantGolds);  
-#ifdef _DEBUG
-					_MESSAGE("[BARTER] merchant: %p  totalGolds: %d  merchantGolds: %d  containerGolds: %d", ref, totalGolds, merchantGolds, contaienrGolds);
-#endif // _DEBUG
-					return (contaienrGolds > 0) ? contaienrGolds : merchantGolds;//In game,BarterMenu uses container's gold first,then use merchant's gold to trade.
+					TESForm* baseForm = ref->baseForm;
+					if (baseForm->Is(FormType::NPC) || baseForm->Is(FormType::Container))
+					{
+						InventoryChanges* (__cdecl* GetInventoryChanges)(TESObjectREFR* ref) = (InventoryChanges*(__cdecl*)(TESObjectREFR* actor))0x00476800;
+						auto pChanges = GetInventoryChanges(ref);
+						auto pGold = LookupFormByID(0xF);
+						if (pChanges != nullptr && pGold != nullptr)
+						{
+							return pChanges->GetItemCount(pGold);
+						}
+					}
 				}
 			}
 		}
-		return -1;
+		return static_cast<SInt32>(pExtraList->GetItemCount());
 	}
 
 	static void InitHook()
